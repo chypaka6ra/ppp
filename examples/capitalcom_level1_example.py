@@ -1,15 +1,19 @@
 """
 Capital.com Level1 Quotes - Usage Examples
 
-Demonstrates various ways to use the CapitalComLevel1Quotes class.
+Demonstrates various ways to use the CapitalComLevel1Quotes (polling)
+and CapitalComLevel1WebSocket (streaming) classes.
 """
 
 import asyncio
 from lib.brokers.capitalcom import (
     CapitalComLevel1Quotes,
+    CapitalComLevel1WebSocket,
     get_level1_quote,
+    stream_level1_quotes_websocket,
     CapitalComAuthenticationError,
-    CapitalComConnectionError
+    CapitalComConnectionError,
+    CapitalComWebSocketError
 )
 
 
@@ -175,19 +179,214 @@ async def example_custom_processing():
         print(f"Error: {e}")
 
 
+# WebSocket Examples (Recommended for Real-time Data)
+
+# Example 7: WebSocket - Simple streaming
+async def example_websocket_streaming():
+    """Stream quotes via WebSocket (most efficient)"""
+    try:
+        async with CapitalComLevel1WebSocket(
+            api_key='your_api_key',
+            identifier='your_email@example.com',
+            password='your_password'
+        ) as ws:
+            def on_quote(quote):
+                print(f"{quote.symbol}: {quote.bid:.4f}/{quote.ask:.4f}")
+
+            await ws.subscribe(['CS.D', 'AAPL.US'], callback=on_quote)
+
+            # Keep receiving for 60 seconds
+            try:
+                await asyncio.wait_for(ws._receive_loop(), timeout=60)
+            except asyncio.TimeoutError:
+                pass
+
+    except CapitalComWebSocketError as e:
+        print(f"WebSocket error: {e}")
+    except (CapitalComAuthenticationError, CapitalComConnectionError) as e:
+        print(f"Error: {e}")
+
+
+# Example 8: WebSocket - Async iterator
+async def example_websocket_async_iterator():
+    """Use async iterator with WebSocket"""
+    try:
+        async with CapitalComLevel1WebSocket(
+            api_key='your_api_key',
+            identifier='your_email@example.com',
+            password='your_password'
+        ) as ws:
+            await ws.subscribe(['CS.D'])
+
+            # Get 10 quotes via iterator
+            for i in range(10):
+                try:
+                    quote = await asyncio.wait_for(
+                        ws.__anext__(),
+                        timeout=5.0
+                    )
+                    print(f"Quote {i+1}: {quote.symbol} @ {quote.last_price}")
+                except asyncio.TimeoutError:
+                    print(f"Timeout waiting for quote {i+1}")
+                    break
+
+    except (CapitalComAuthenticationError, CapitalComConnectionError) as e:
+        print(f"Error: {e}")
+
+
+# Example 9: WebSocket - Convenience function
+async def example_websocket_convenience():
+    """Use convenience function for WebSocket"""
+    try:
+        # Get single quote via WebSocket
+        quote = await get_level1_quote(
+            api_key='your_api_key',
+            identifier='your_email@example.com',
+            password='your_password',
+            symbol='CS.D',
+            use_websocket=True  # Use WebSocket instead of polling
+        )
+
+        print(f"Symbol: {quote.symbol}")
+        print(f"Bid: {quote.bid}")
+        print(f"Ask: {quote.ask}")
+        print(f"Change: {quote.percentage_change}%")
+
+    except (CapitalComAuthenticationError, CapitalComConnectionError) as e:
+        print(f"Error: {e}")
+
+
+# Example 10: WebSocket - Stream with error handling
+async def example_websocket_with_errors():
+    """WebSocket streaming with comprehensive error handling"""
+
+    def on_error(error):
+        print(f"Error occurred: {type(error).__name__}: {error}")
+
+    def on_quote(quote):
+        print(f"{quote.symbol}: {quote.bid}/{quote.ask}")
+
+    try:
+        async with CapitalComLevel1WebSocket(
+            api_key='your_api_key',
+            identifier='your_email@example.com',
+            password='your_password'
+        ) as ws:
+            ws.set_error_handler(on_error)
+
+            # Subscribe (max 40 instruments)
+            symbols = ['CS.D', 'AAPL.US', 'GOOGL.US']
+            await ws.subscribe(symbols, callback=on_quote)
+
+            # Stream for 120 seconds
+            try:
+                await asyncio.wait_for(ws._receive_loop(), timeout=120)
+            except asyncio.TimeoutError:
+                pass
+
+    except CapitalComWebSocketError as e:
+        print(f"WebSocket error: {e}")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+
+
+# Example 11: WebSocket - Convenience streaming function
+async def example_websocket_convenience_stream():
+    """Use convenience function for WebSocket streaming"""
+
+    def on_quote(quote):
+        print(f"{quote.symbol}: Bid={quote.bid:.4f} Ask={quote.ask:.4f}")
+
+    try:
+        await stream_level1_quotes_websocket(
+            api_key='your_api_key',
+            identifier='your_email@example.com',
+            password='your_password',
+            symbols=['CS.D', 'AAPL.US'],
+            callback=on_quote
+        )
+    except Exception as e:
+        print(f"Error: {e}")
+
+
+# Example 12: REST vs WebSocket comparison
+async def example_rest_vs_websocket():
+    """Compare REST polling vs WebSocket streaming"""
+
+    print("REST Polling (1 second interval):")
+    async with CapitalComLevel1Quotes(
+        api_key='your_api_key',
+        identifier='your_email@example.com',
+        password='your_password'
+    ) as quotes:
+        await quotes.subscribe(['CS.D'])
+        start = asyncio.get_event_loop().time()
+
+        for _ in range(5):
+            data = await quotes._fetch_market_data()
+            elapsed = asyncio.get_event_loop().time() - start
+            if data:
+                print(f"  {elapsed:.2f}s: {data[0].symbol} @ {data[0].last_price}")
+
+    print("\nWebSocket Streaming (real-time):")
+    quotes_received = []
+
+    def on_quote(quote):
+        quotes_received.append(quote)
+
+    async with CapitalComLevel1WebSocket(
+        api_key='your_api_key',
+        identifier='your_email@example.com',
+        password='your_password'
+    ) as ws:
+        await ws.subscribe(['CS.D'], callback=on_quote)
+
+        try:
+            await asyncio.wait_for(ws._receive_loop(), timeout=5)
+        except asyncio.TimeoutError:
+            pass
+
+    print(f"  Received {len(quotes_received)} quotes in 5 seconds")
+
+
 if __name__ == '__main__':
     print("Capital.com Level1 Quotes Examples")
-    print("=" * 50)
+    print("=" * 70)
     print("\nBefore running these examples:")
     print("1. Replace 'your_api_key' with your Capital.com API key")
     print("2. Replace 'your_email@example.com' with your Capital.com email")
     print("3. Replace 'your_password' with your password")
     print("\nChoose an example to run by uncommenting it below.\n")
 
-    # Uncomment one of these to run:
+    print("REST API Examples (Polling):")
+    print("  - example_single_quote()")
+    print("  - example_with_callback()")
+    print("  - example_async_iterator()")
+    print("  - example_continuous_polling()")
+    print("  - example_multiple_subscriptions()")
+    print("  - example_custom_processing()")
+
+    print("\nWebSocket Examples (RECOMMENDED for real-time):")
+    print("  - example_websocket_streaming()")
+    print("  - example_websocket_async_iterator()")
+    print("  - example_websocket_convenience()")
+    print("  - example_websocket_with_errors()")
+    print("  - example_websocket_convenience_stream()")
+    print("  - example_rest_vs_websocket()")
+
+    print("\nUncomment one of these to run:")
+    # REST Examples
     # asyncio.run(example_single_quote())
     # asyncio.run(example_with_callback())
     # asyncio.run(example_async_iterator())
     # asyncio.run(example_continuous_polling())
     # asyncio.run(example_multiple_subscriptions())
     # asyncio.run(example_custom_processing())
+
+    # WebSocket Examples
+    # asyncio.run(example_websocket_streaming())
+    # asyncio.run(example_websocket_async_iterator())
+    # asyncio.run(example_websocket_convenience())
+    # asyncio.run(example_websocket_with_errors())
+    # asyncio.run(example_websocket_convenience_stream())
+    # asyncio.run(example_rest_vs_websocket())
